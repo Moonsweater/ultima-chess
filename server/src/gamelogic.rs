@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, thread::current};
 
 #[derive(PartialEq, Eq)]
 pub enum UltimaPieceType {
@@ -65,6 +65,9 @@ struct PieceMismatchError {
     //probably should be a struct? But maybe could be an enum if we do manual 'inheritance'.
 }
 
+#[derive(Debug)]
+pub struct RankOutOfBoundsError();
+
 impl Rankfile {
 
     pub fn as_coords(&self) -> (usize, usize) {
@@ -90,7 +93,7 @@ impl Rankfile {
         })
     }
 
-    fn rank_from_coord(rank_int: usize) -> Result<Rank, ()> {
+    fn rank_from_coord(rank_int: i8) -> Result<Rank, RankOutOfBoundsError> {
         match rank_int {
             0 => Ok(Rank::R1),
             1 => Ok(Rank::R2),
@@ -100,11 +103,11 @@ impl Rankfile {
             5 => Ok(Rank::R6),
             6 => Ok(Rank::R7),
             7 => Ok(Rank::R8),
-            _ => Err(())
+            _ => Err(RankOutOfBoundsError{})
         }
     }
 
-    fn file_from_coord(file_int: usize) -> Result<File, ()> {
+    fn file_from_coord(file_int: i8) -> Result<File, RankOutOfBoundsError> {
         match file_int {
             0 => Ok(File::A),
             1 => Ok(File::B),
@@ -114,16 +117,25 @@ impl Rankfile {
             5 => Ok(File::F),
             6 => Ok(File::G),
             7 => Ok(File::H),
-            _ => Err(())
+            _ => Err(RankOutOfBoundsError{})
         }
     }
 
-    pub fn from_coords(rank_int: usize, file_int: usize) -> Self {
-        //danger: unwraps.
-        Self {
-            rank: Self::rank_from_coord(rank_int).unwrap(),
-            file: Self::file_from_coord(file_int).unwrap()
-        }
+    pub fn from_coords_signed(rank_int: i8, file_int: i8) -> Result<Self, RankOutOfBoundsError> {
+        //signed to allow this function to perform our bounds checking
+        Ok(Self {
+            rank: Self::rank_from_coord(rank_int)?,
+            file: Self::file_from_coord(file_int)?
+        })
+    }
+
+    pub fn from_coords(rank_int: usize, file_int: usize) -> Result<Self, RankOutOfBoundsError> {
+        //converts types, but if our ranks and files are in the ranges where it affects anything,
+        //something has already gone horribly wrong.
+        Ok(Self {
+            rank: Self::rank_from_coord(rank_int as i8)?,
+            file: Self::file_from_coord(file_int as i8)?
+        })
     }
 
     pub fn from_string() -> Self {
@@ -131,7 +143,6 @@ impl Rankfile {
     }
 
     //probably useless, since we need to test for obstruction anyway. :p
-
     fn is_in_cardinal_line(a: &Self, b: &Self) -> bool {
         return a.rank == b.rank || a.file == b.file
     }
@@ -167,7 +178,7 @@ struct GameBoard([[Option<UltimaPiece>; 8]; 8]);
 
 impl GameBoard {
 
-    pub fn view_square<'boardlife> (&'boardlife self, pos: Rankfile) -> &'boardlife Option<UltimaPiece> {
+    pub fn view_square<'boardlife> (&'boardlife self, pos: &Rankfile) -> &'boardlife Option<UltimaPiece> {
         let (r, f) = pos.as_coords();
         &(self.0[r][f])
     }
@@ -286,7 +297,7 @@ impl GameBoard {
     // If valid, returns an empty Ok. Else, returns an Err containing a descriptive error enum.
     fn board_matches(&self, piece: UltimaPiece, pos: Rankfile) -> Result<(), PieceMismatchError> {
         let wrapped_piece = &Some(piece);
-        let wrapped_board_piece = self.view_square(pos);
+        let wrapped_board_piece = self.view_square(&pos);
         match (wrapped_piece, wrapped_board_piece) {
             (Some(p), Some(b)) => {
                 if p.color != b.color {
@@ -307,100 +318,34 @@ impl GameBoard {
         let (start_rank, start_file) = start.as_coords();
         let mut legal_targets: HashSet<Rankfile> = HashSet::new();
 
-        let check_standard_piece_cardinals = |legal_targets: &mut HashSet<Rankfile>| {
-            //up from start:
-            for current_rank in (start_rank+1)..8 {
-                let current_square = &(self.0[current_rank][start_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
-                }
-            }
-            //down from start:
-            for current_rank in (0..start_rank).rev() {
-                let current_square = &(self.0[current_rank][start_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
-                }
-            }
-            //left from start:
-            for current_file in (0..start_file).rev() {
-                let current_square = &(self.0[start_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(start_rank, current_file));}
-                }
-            }
-            //right from start:
-            for current_file in ((start_file+1)..8).rev() {
-                let current_square = &(self.0[start_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(start_rank, current_file));}
+        let cardinal_directions: [(i8, i8); 4] = [(1, 0), (-1, 0), (-1, 0), (0, 1)];
+        let ordinal_directions: [(i8, i8); 4] = [(1, 1), (-1, 1), (-1, -1), (1, -1)];
+
+        let check_standard_piece_cardinals = |legal_targets: &mut HashSet<Rankfile>| {   
+            for (r_direction, f_direction) in cardinal_directions {
+                let current_rank = start_rank as i8 + r_direction;
+                let current_file = start_file as i8 + f_direction;
+                while let Ok(rankfile) = Rankfile::from_coords_signed(current_rank, current_file) {
+                    let current_square = self.view_square(&rankfile);
+                    match current_square {
+                        Some(_p) => {break;},
+                        None => {legal_targets.insert(rankfile);}
+                    }
                 }
             }
         };
 
-        let check_standard_piece_diagonals = |legal_targets: &mut HashSet<Rankfile>| {
-            
-            let mut current_rank;
-            let mut current_file;
-
-            //towards top-right:
-            current_rank = start_rank + 1;
-            current_file = start_file + 1;
-
-            while current_rank < 8 && current_file < 8 {
-                let current_square = &(self.0[current_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
+        let check_standard_piece_ordinals = |legal_targets: &mut HashSet<Rankfile>| {   
+            for (r_direction, f_direction) in ordinal_directions {
+                let current_rank = start_rank as i8 + r_direction;
+                let current_file = start_file as i8 + f_direction;
+                while let Ok(rankfile) = Rankfile::from_coords_signed(current_rank, current_file) {
+                    let current_square = self.view_square(&rankfile);
+                    match current_square {
+                        Some(_p) => {break;},
+                        None => {legal_targets.insert(rankfile);}
+                    }
                 }
-                current_rank += 1;
-                current_file += 1;
-            }
-
-            //towards top-left:
-            current_rank = start_rank + 1;
-            current_file = start_file - 1;
-
-            while current_rank < 8 && current_file <= 0 {
-                let current_square = &(self.0[current_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
-                }
-                current_rank += 1;
-                current_file -= 1;
-            }
-
-            //towards bottom-left:         
-            current_rank = start_rank - 1;
-            current_file = start_file - 1;
-
-            while current_rank >= 0 && current_file >= 0{
-                let current_square = &(self.0[current_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
-                }
-                current_rank -= 1;
-                current_file -= 1;
-            }
-
-            //towards bottom-right:        
-            current_rank = start_rank - 1;
-            current_file = start_file + 1;
-
-            while current_rank  >= 0 && current_file < 8 {
-                let current_square = &(self.0[current_rank][current_file]);
-                match current_square {
-                    Some(_piece) => {break;}
-                    None => {legal_targets.insert(Rankfile::from_coords(current_rank, start_file));}
-                }
-                current_rank -= 1;
-                current_file += 1;
             }
         };
 
@@ -409,21 +354,65 @@ impl GameBoard {
                 check_standard_piece_cardinals(&mut legal_targets);
             },
             UltimaPieceType::King => {
-                
+                //For now, simply assume checkmate never happens.
+                let start_rank = start_rank as i8;
+                let start_file = start_file as i8;
+                for (r, f) in cardinal_directions {
+                    if let Ok(rankfile) = Rankfile::from_coords_signed(start_rank + r, start_file + f) {
+                        legal_targets.insert(rankfile);
+                    }
+                }
+                for (r, f) in ordinal_directions {
+                    if let Ok(rankfile) = Rankfile::from_coords_signed(start_rank + r, start_file + f) {
+                        legal_targets.insert(rankfile);
+                    }
+                }
+
             },
             UltimaPieceType::Withdrawer => {
                 check_standard_piece_cardinals(&mut legal_targets);
-                check_standard_piece_diagonals(&mut legal_targets);
+                check_standard_piece_ordinals(&mut legal_targets);
             },
-            UltimaPieceType::Chameleon => {},
-            UltimaPieceType::Longleaper => {},
+            UltimaPieceType::Chameleon => { 
+                todo!();
+                //chameleon is pretty complicated. Put on hold for now.
+            },
+            UltimaPieceType::Longleaper => {
+                let check_longleaper_moves = |directions: [(i8, i8); 4], legal_targets: &mut HashSet<Rankfile>| {   
+                    for (r_direction, f_direction) in directions {
+                        let current_rank = start_rank as i8 + r_direction;
+                        let current_file = start_file as i8 + f_direction;
+                        let mut prev_was_enemy_piece = false;
+                        while let Ok(rankfile) = Rankfile::from_coords_signed(current_rank, current_file) {
+                            let current_square = self.view_square(&rankfile);
+                            match current_square {
+                                Some(current_piece) => {
+                                    if prev_was_enemy_piece {
+                                        break;
+                                    } else {
+                                        if current_piece.color == piece.color {
+                                            break;
+                                        } else {
+                                            prev_was_enemy_piece = true;
+                                            //continue
+                                        }
+                                    }
+                                },
+                                None => {legal_targets.insert(rankfile);}
+                            }
+                        }
+                    }
+                };
+                check_longleaper_moves(cardinal_directions, &mut legal_targets);
+                check_longleaper_moves(ordinal_directions, &mut legal_targets);
+            },
             UltimaPieceType::Coordinator => {
                 check_standard_piece_cardinals(&mut legal_targets);
-                check_standard_piece_diagonals(&mut legal_targets);
+                check_standard_piece_ordinals(&mut legal_targets);
             },
             UltimaPieceType::Immobilizer => {
                 check_standard_piece_cardinals(&mut legal_targets);
-                check_standard_piece_diagonals(&mut legal_targets);
+                check_standard_piece_ordinals(&mut legal_targets);
             }
         }
 
