@@ -1,3 +1,13 @@
+[workspace]
+
+members = [
+    "game",
+]
+
+[lib]
+
+path = "game/src/lib.rs"
+
 [package]
 name = "server"
 version = "0.1.0"
