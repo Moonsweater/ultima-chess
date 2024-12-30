@@ -176,7 +176,7 @@ pub mod board {
         const B_BACK_RANK: [Square; 8] = [
             Some(UltimaPiece {
                 color: PlayerColor::Black,
-                piece_type: UltimaPieceType::Immobilizer
+                piece_type: UltimaPieceType::Coordinator
             }),
             Some(UltimaPiece {
                 color: PlayerColor::Black,
@@ -185,10 +185,6 @@ pub mod board {
             Some(UltimaPiece {
                 color: PlayerColor::Black,
                 piece_type: UltimaPieceType::Chameleon
-            }),
-            Some(UltimaPiece {
-                color: PlayerColor::Black,
-                piece_type: UltimaPieceType::King
             }),
             Some(UltimaPiece {
                 color: PlayerColor::Black,
@@ -196,6 +192,10 @@ pub mod board {
             }),
             Some(UltimaPiece {
                 color: PlayerColor::Black,
+                piece_type: UltimaPieceType::King
+            }),
+            Some(UltimaPiece {
+                color: PlayerColor::Black,
                 piece_type: UltimaPieceType::Chameleon
             }),
             Some(UltimaPiece {
@@ -204,19 +204,19 @@ pub mod board {
             }),
             Some(UltimaPiece {
                 color: PlayerColor::Black,
-                piece_type: UltimaPieceType::Coordinator
+                piece_type: UltimaPieceType::Immobilizer
             })
         ];
 
         pub const START_BOARD: [[Square; 8]; 8] = [
-            B_BACK_RANK,
-            B_PAWN_RANK,
-            EMPTY_RANK,
-            EMPTY_RANK,
-            EMPTY_RANK,
-            EMPTY_RANK,
+            W_BACK_RANK,
             W_PAWN_RANK,
-            W_BACK_RANK
+            EMPTY_RANK,
+            EMPTY_RANK,
+            EMPTY_RANK,
+            EMPTY_RANK,
+            B_PAWN_RANK,
+            B_BACK_RANK
         ];
 
         pub const W_KING_LOC: Rankfile = Rankfile{rank: Rank::R1, file: File::D};

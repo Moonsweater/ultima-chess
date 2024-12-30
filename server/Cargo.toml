@@ -1,7 +1,8 @@
 [workspace]
 
-members = [
+members = [ "cli_test",
     "game",
+    "cli_test",
 ]
 
 [lib]
