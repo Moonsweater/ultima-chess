@@ -9,3 +9,5 @@ pub use datatypes::{
     piece::{UltimaPiece, UltimaPieceType, PlayerColor},
     moves::MoveData
 };
+
+pub use logic::*;

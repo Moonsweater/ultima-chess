@@ -7,7 +7,6 @@ use super::datatypes::{
     };
 
 pub mod move_validation {
-
     use std::collections::HashSet;
 
     use super::*;
@@ -39,14 +38,16 @@ pub mod move_validation {
         let (r, f) = start.to_signed_coords();
         let mut moves = HashSet::<MoveData>::new();
         for (dr, df) in directions {
-            moves.extend((0..8).map_while(|i| {
+            moves.extend((1..8).map_while(|i| {
                 //filter out of bounds squares
                 Rankfile::from_signed_coords(r + dr * i, f + df * i)
             }).map_while(|rf| {
                 //filter by line of sight, return move data.
-                if let None = board.get_square(rf) {
-                    return None;
+                match board.get_square(rf) {
+                    None => {}, //continue
+                    Some(_) => return None
                 }
+                
                 let capture_data = CaptureData {
                     start,
                     end: rf,
@@ -135,6 +136,7 @@ pub mod move_validation {
                     let mut dr_mut = dr; let mut df_mut = df;
                     let mut captures = vec![];
                     while let Some(rf) = Rankfile::from_signed_coords(r + dr_mut, f + df_mut) {
+                        dr_mut += dr; df_mut += df; //to ensure we don't try the longleaper's own square
                         match board.get_square(rf) {
                             Some(p) => {
                                 if p.color == color {
@@ -158,12 +160,9 @@ pub mod move_validation {
                             rf,
                             captures.clone()
                         ));
-
-                        dr_mut += dr; df_mut += df;
                     }
                 }
-
-                todo!();
+                moves
             }
         }
 
@@ -275,4 +274,8 @@ pub mod move_validation {
             }     
         }
     }
+}
+
+pub mod board_changes {
+    
 }

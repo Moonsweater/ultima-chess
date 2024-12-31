@@ -108,11 +108,48 @@ pub mod board {
             pub fn to_unsigned_coords(&self) -> (usize, usize) {
                 (self.rank.as_index() as usize, self.file.as_index() as usize)
             }
+            pub fn from_strings(r: String, f: String) -> Option<Self> {
+                let r = match r.as_str() {
+                    "1" => Rank::R1, "2" => Rank::R2, 
+                    "3" => Rank::R3, "4" => Rank::R4, 
+                    "5" => Rank::R5, "6" => Rank::R6, 
+                    "7" => Rank::R7, "8" => Rank::R8,
+                    _ => {return None;}
+                };
+                let f = match f.as_str() {
+                    "A" => File::A, "B" => File::B, 
+                    "C" => File::C, "D" => File::D, 
+                    "E" => File::E, "F" => File::F, 
+                    "G" => File::G, "H" => File::H,
+                    _ => {return None;}
+                };
+                Some(Self {
+                    rank: r, file: f
+                })
+            }
+            pub fn to_strings(&self) -> (String, String) {
+                let Rankfile{rank: r, file: f} = self;
+                let r_str = match r {
+                    Rank::R1 => "1", Rank::R2 => "2", 
+                    Rank::R3 => "3", Rank::R4 => "4", 
+                    Rank::R5 => "5", Rank::R6 => "6", 
+                    Rank::R7 => "7", Rank::R8 => "8"
+                };
+                let f_str = match f {
+                    File::A => "A", File::B =>"B", 
+                    File::C => "C", File::D =>"D", 
+                    File::E => "E", File::F =>"F", 
+                    File::G => "G", File::H =>"H"
+                };
+                (String::from(r_str), String::from(f_str))
+            }
 
         }
     }
+
     use position::Rankfile;
 
+    #[derive(Clone)]
     pub struct GameBoard {
         board:[[Square; 8]; 8],
         black_king_locs: Vec<Rankfile>,
@@ -267,9 +304,9 @@ pub mod moves {
 
     #[derive(PartialEq, Eq, Hash)]
     pub struct MoveData {
-        start: Rankfile,
-        end: Rankfile,
-        captures: Vec<Rankfile>
+        pub start: Rankfile,
+        pub end: Rankfile,
+        pub captures: Vec<Rankfile>
     }
 
     impl MoveData {
