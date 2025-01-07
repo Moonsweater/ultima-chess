@@ -1,160 +1,137 @@
 use super::datatypes::{
         board::{GameBoard, 
-            position::Rankfile
+            rankfile
         },
         piece::{UltimaPiece, UltimaPieceType, PlayerColor},
         moves::MoveData
     };
+use rankfile::Rankfile;
 
 pub mod move_validation {
     use std::collections::HashSet;
 
     use super::*;
 
-    type Direction = (i8, i8);
-
-    const ALL_DIRECTIONS: [Direction; 8] = [(1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1)];
-    const CARDINAL_DIRECTIONS: [Direction; 4] = [(1, 0), (0, -1), (-1, 0), (0, 1)];
-
     ///Sufficient data to determine when a capture will occur for any piece.
     struct CaptureData<'board> {
+        board: &'board GameBoard,
         start: Rankfile,
         end: Rankfile,
-        piece: UltimaPiece,
-        board: &'board GameBoard
+        piece: UltimaPiece
     }
 
     //For pieces with 'normal' ultima movement:
     //withdrawer, immobilizer, coordinator, pawn    
-    fn generate_standard_piece_moves(
-        board: &GameBoard, 
-        start: Rankfile, 
-        directions: impl Iterator<Item = &'static Direction>,
-        piece: UltimaPiece,
-        capture_method: impl Fn(CaptureData) -> Vec<Rankfile>
-    ) 
-        -> HashSet<MoveData> 
-    {
-        let (r, f) = start.to_signed_coords();
-        let mut moves = HashSet::<MoveData>::new();
-        for (dr, df) in directions {
-            moves.extend((1..8).map_while(|i| {
-                //filter out of bounds squares
-                Rankfile::from_signed_coords(r + dr * i, f + df * i)
-            }).map_while(|rf| {
-                //filter by line of sight, return move data.
-                match board.get_square(rf) {
-                    None => {}, //continue
-                    Some(_) => return None
-                }
-                
-                let capture_data = CaptureData {
-                    start,
-                    end: rf,
-                    piece,
-                    board,
-                };
-                Some(
-                    MoveData::new(start, rf, capture_method(capture_data))
-                )
-            }));
-        }
-        moves
-    }
 
-    
     mod piece_checkers {
         use super::*;
         pub mod pawn {
             use super::*;
-            pub fn capture_checker<'board>(capture_data: CaptureData<'board>) -> Vec<Rankfile> {
-                let CaptureData {
-                    start,
-                    end,
-                    piece,
-                    board,
-                } = capture_data;
-                let (r, f) = end.to_signed_coords();
-                let mut captures = vec![];
-                for (dr, df) in ALL_DIRECTIONS {
-                    let surrounding_piece =
-                    match board.get_square_from_coords(r + 2 * dr, f + 2 * df) {
-                        None => continue,
-                        Some(p) => p
-                    };
-                    if surrounding_piece.color == piece.color {
-                        if let Some(rf) = Rankfile::from_signed_coords(r, f) {
-                            captures.push(rf);
-                        }
-                    }
-                }
-                captures
+            pub fn move_generator_iter<'board>
+            (board: &'board GameBoard, start: Rankfile, color: PlayerColor) 
+            -> impl Iterator<Item = MoveData> + 'board 
+            { 
+                Rankfile::cardinal_directions().flat_map(move |&dir| {
+                    board.los(start, dir).map(move |rf| {
+                        let captures = Rankfile::all_directions().filter_map(|&(dr, df)| { 
+                            let (r, f) = rf.to_signed_coords();
+                            let surrounding = board.get_square_from_coords(r + 2 * dr, f + 2 * df)?;
+                            if surrounding.color == color {
+                                Some(Rankfile::from(r + dr, f + df)?)
+                            } else {None}
+                        }).collect();
+                        MoveData{start, end: rf, captures}
+                    })
+                })
             }
         }
 
         pub mod immobilizer {
-            //no captures can occur.
+            use super::*;
+
+            //In addition to checking for legal moves and captures, 
+            //we provide a function to see if some OTHER piece is next to an immobilizer or not.
+            //This also checks to see if an immobilizer is immobilized by a chameleon.
+           
+            pub fn is_immobilized(board: &GameBoard, location: Rankfile, piece: UltimaPiece) -> bool {
+                use UltimaPieceType::*;
+                let (r, f) = location.to_signed_coords();
+                for (dr, df) in Rankfile::all_directions() {
+                    let Some(rf) = Rankfile::from(r + dr, f + df) else {continue};
+                    let Some(adjacent_piece) = board.get_square(rf) else {continue};
+                    if adjacent_piece.piece_type == Immobilizer 
+                        && piece.color != adjacent_piece.color 
+                    {
+                        return true;
+                    }
+                    if piece.piece_type == Immobilizer
+                        && adjacent_piece.piece_type == Chameleon
+                        && piece.color != adjacent_piece.color 
+                    {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            pub fn move_generator_iter<'board> 
+            (board: &'board GameBoard, start:Rankfile)
+            -> impl Iterator<Item = MoveData> + 'board
+            {
+                Rankfile::all_directions().flat_map(move |&dir| {
+                    board.los(start, dir).map(move |rf| {
+                        MoveData::new(start, rf, vec![])
+                    })
+                })
+            }
         }
     
         pub mod coordinator {
             use super::*;
-            pub fn capture_checker<'board>(capture_data: CaptureData<'board>) -> Vec<Rankfile> {
-                let CaptureData {
-                    start: _start,
-                    end,
-                    piece,
-                    board,
-                } = capture_data;
-                let mut captures = vec![];
-                for king_pos in board.get_king_locs(piece.color) {
-                    captures.push(Rankfile{
-                        rank: end.rank,
-                        file: king_pos.file
-                    });
-                    captures.push(Rankfile {
-                        rank: king_pos.rank,
-                        file: end.file
-                    });
-                }
-                captures  
+
+            pub fn move_generator_iter<'board>
+            (board: &'board GameBoard, start: Rankfile, color: PlayerColor) 
+            -> impl Iterator<Item = MoveData> + 'board 
+            {
+                Rankfile::all_directions().flat_map(move |&dir| {
+                    board.los(start, dir).map(move |rf| {
+                        let mut captures = vec![];
+                        for king in board.get_king_locs(color) {
+                            captures.push(Rankfile{rank: rf.rank, file: king.file});
+                            captures.push(Rankfile{rank: king.rank, file: rf.file});
+                        }
+                        MoveData::new(start, rf, captures)
+                    })
+                })
             }
         }
 
         pub mod longleaper {
             use super::*;
-            pub fn generate_moves (
-                board: &GameBoard, 
-                start: Rankfile,
-                color: PlayerColor
-            ) 
-                -> HashSet<MoveData>
+            pub fn generate_moves<'board> (board: &'board GameBoard, start: Rankfile, color: PlayerColor) -> HashSet<MoveData>
             {
                 let mut moves = HashSet::<MoveData>::new();
                 let (r, f) = start.to_signed_coords();
-                for (dr, df) in ALL_DIRECTIONS {
-                    let mut prev_target_occupied = false;
-                    let mut dr_mut = dr; let mut df_mut = df;
+                for (dr, df) in Rankfile::all_directions() {
+                    let mut leapt_prev_target = false;
+                    let mut dr_mut = *dr; let mut df_mut = *df;
                     let mut captures = vec![];
-                    while let Some(rf) = Rankfile::from_signed_coords(r + dr_mut, f + df_mut) {
-                        dr_mut += dr; df_mut += df; //to ensure we don't try the longleaper's own square
-                        match board.get_square(rf) {
-                            Some(p) => {
-                                if p.color == color {
-                                    break;
-                                } else if !prev_target_occupied {
-                                    prev_target_occupied = true;
-                                    //proceed
-                                } else {
-                                    break;
-                                }
-                            },
-                            None => {} //proceed
+                    while let Some(rf) = Rankfile::from(r + dr_mut, f + df_mut) {
+                        if let Some(piece) =  board.get_square(rf) {
+                            if piece.color == color {
+                                break;
+                            } else if leapt_prev_target {
+                                break; //can't leap two adjacent enemies
+                            } else {
+                                leapt_prev_target = true;
+                                continue; //can't move onto this square, but maybe the next is good.
+                            }
+                        } else {
+                            leapt_prev_target = false;
                         }
-
-                        if prev_target_occupied {
+                        if leapt_prev_target {
                             captures.push(rf);
                         }
-
                         moves.insert(MoveData::new(
                             start,
                             rf,
@@ -167,115 +144,104 @@ pub mod move_validation {
         }
 
         pub mod chameleon {
-            use super::*;
-            fn generate_moves() {
-                unimplemented!();
-            }
-        }
 
+            //Errata: We declare that a chameleon adjacent to a king can always capture that king, even if the square is defended.
+            //This is because, although a chameleon must move like a king, and thus not move into squares that could allow it to be captured the following turn,
+            
+            //Note: chameleons immobilizing immobilizers is handled inside the `immobilizer` module.
+
+            use super::*;
+
+        }
         pub mod withdrawer {
             use super::*;
-            pub fn capture_checker(capture_data: CaptureData) -> Vec<Rankfile> {
-                let CaptureData {
-                    start,
-                    end,
-                    board,
-                    piece
-                } = capture_data;
-                let mut captures = vec![];
-                let (end_r, end_f) = end.to_signed_coords();
-                let mut end_surrounding_squares = HashSet::<Rankfile>::new();
-                for (dr, df) in ALL_DIRECTIONS {
-                    if let Some(rf) = Rankfile::from_signed_coords(end_r + dr, end_f + df) {
-                        end_surrounding_squares.insert(rf);
-                    }
-                }
-                let (start_r, start_f) = start.to_signed_coords();
-                for (dr, df) in ALL_DIRECTIONS {
-                    if let Some(rf) = Rankfile::from_signed_coords(start_r + dr, start_f + df) {
-                        if !end_surrounding_squares.contains(&rf) {
-                            //if we started out move adjacent to rf, and ended it not adjacent
-                            captures.push(rf);
-                        }
-                    }
-                }
-                captures
+            pub fn move_generator_iter<'board> (board: &'board GameBoard, start: Rankfile, color: PlayerColor)
+            -> impl Iterator<Item = MoveData> + 'board 
+            {
+                Rankfile::all_directions().flat_map(move |&dir| {
+                    board.los(start, dir).map(move |rf| {
+                        (start.surrounding_rankfiles().filter_map(|adj_start| {
+                            let piece = board.get_square(adj_start)?;
+                            if piece.color != color {Some(rf)} else {None}
+                        }).filter(|&adj_start| {
+                            for adj_end in rf.surrounding_rankfiles() {
+                                if adj_end == adj_start {return true;}
+                            }
+                            false
+                        }).collect(), rf)
+                    }).map(move |(captures, end)| {
+                        MoveData {start, end, captures}
+                    })  
+                })
             }
         }
 
         pub mod king {
             //for now, ignore checkmate, just play by capture-the-king rules.
             use super::*;
-            pub fn generate_moves(start: Rankfile) -> HashSet<MoveData> {
+            pub fn move_generator_iter(board: &GameBoard, start: Rankfile, color: PlayerColor) -> HashSet<MoveData> {
                 let mut moves = HashSet::<MoveData>::new();
-                let (r, f) = start.to_signed_coords();
-                for (dr, df) in ALL_DIRECTIONS {
-                    if let Some(rf) = Rankfile::from_signed_coords(r + dr, f + df) {
-                        moves.insert(MoveData::new(
-                            start,
-                            rf,
-                            vec![rf]
-                        ));
+                moves.extend(start.surrounding_rankfiles().filter_map(|rf| {
+                    let Some(piece) = board.get_square(rf) 
+                    else {
+                        return Some(MoveData{start, end: rf, captures: vec![]});
+                    };
+                    if piece.color != color {
+                        return Some(MoveData{start, end: rf, captures: vec![rf]});
+                    } else {
+                        return None;
                     }
-                }
+                }));
                 moves
             }
             
         }
         
     }
-    use piece_checkers::{pawn, king, coordinator, withdrawer, immobilizer, longleaper, chameleon};
+    use piece_checkers::{chameleon, coordinator::{self, move_generator_iter}, immobilizer::{self, is_immobilized}, king, longleaper, pawn, withdrawer};
 
     pub fn get_all_legal_moves(board: &GameBoard, start: Rankfile, piece: UltimaPiece) -> HashSet<MoveData> {
+        use UltimaPieceType::*;
+        if is_immobilized(board, start, piece) {return HashSet::new()}
+        let color = piece.color;
         match piece.piece_type {
-            UltimaPieceType::Chameleon => {
+            Chameleon => {
                 todo!();
             },
-            UltimaPieceType::Coordinator => {
-                generate_standard_piece_moves(
-                    board, 
-                    start, 
-                    ALL_DIRECTIONS.iter(), 
-                    piece, 
-                    coordinator::capture_checker
-                )
+            Coordinator => {
+                coordinator::move_generator_iter(board, start, color).collect()
             },
-            UltimaPieceType::Immobilizer => {
-                generate_standard_piece_moves(
-                    board, 
-                    start, 
-                    ALL_DIRECTIONS.iter(), 
-                    piece, 
-                    |_capture_data| vec![])
+            Immobilizer => {
+                immobilizer::move_generator_iter(board, start).collect()
             },
-            UltimaPieceType::King => {
-                king::generate_moves(start)
+            King => {
+                king::move_generator_iter(board, start, color)
             },
-            UltimaPieceType::Longleaper => {
-                longleaper::generate_moves(board, start, piece.color)
+            Longleaper => {
+                longleaper::generate_moves(board, start, color)
             },
-            UltimaPieceType::Pawn => {
-                generate_standard_piece_moves(
-                    board,
-                    start, 
-                    CARDINAL_DIRECTIONS.iter(), 
-                    piece, 
-                    pawn::capture_checker
-                )
+            Pawn => {
+                pawn::move_generator_iter(board, start, color).collect()
             },
-            UltimaPieceType::Withdrawer => {
-                generate_standard_piece_moves(
-                    board, 
-                    start, 
-                    ALL_DIRECTIONS.iter(), 
-                    piece, 
-                    withdrawer::capture_checker
-                )
+            Withdrawer => {
+                withdrawer::move_generator_iter(board, start, color).collect()
             }     
         }
     }
 }
 
 pub mod board_changes {
-    
+    use super::*;
+    fn execute_move(board: &mut GameBoard, move_to_execute: MoveData) {
+        let MoveData {
+            start,
+            end,
+            captures
+        } = move_to_execute;
+        for square in captures {
+            board.set_square(square, None);
+        }
+        board.set_square(end, board.get_square(start));
+        board.set_square(start, None);
+    }
 }

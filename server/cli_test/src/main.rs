@@ -84,7 +84,7 @@ fn main() {
         };
         println!("{bw}'s turn.");
         let (piece_moved, start) = loop {
-            println!("Which piece will you move, {bw}? Enter the piece's rank.", );
+            println!("Which piece will you move, {bw}? Enter the piece's rank", );
             let rank_str = scan_string()
                 .replace(" ", "")
                 .replace("\n", "");
