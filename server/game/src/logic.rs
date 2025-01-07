@@ -8,21 +8,8 @@ use super::datatypes::{
 use rankfile::Rankfile;
 
 pub mod move_validation {
-    use std::collections::HashSet;
 
     use super::*;
-
-    ///Sufficient data to determine when a capture will occur for any piece.
-    struct CaptureData<'board> {
-        board: &'board GameBoard,
-        start: Rankfile,
-        end: Rankfile,
-        piece: UltimaPiece
-    }
-
-    //For pieces with 'normal' ultima movement:
-    //withdrawer, immobilizer, coordinator, pawn    
-
     mod piece_checkers {
         use super::*;
         pub mod pawn {
@@ -108,9 +95,9 @@ pub mod move_validation {
 
         pub mod longleaper {
             use super::*;
-            pub fn generate_moves<'board> (board: &'board GameBoard, start: Rankfile, color: PlayerColor) -> HashSet<MoveData>
+            pub fn generate_moves<'board> (board: &'board GameBoard, start: Rankfile, color: PlayerColor) -> Vec<MoveData>
             {
-                let mut moves = HashSet::<MoveData>::new();
+                let mut moves = vec![];
                 let (r, f) = start.to_signed_coords();
                 for (dr, df) in Rankfile::all_directions() {
                     let mut leapt_prev_target = false;
@@ -132,11 +119,13 @@ pub mod move_validation {
                         if leapt_prev_target {
                             captures.push(rf);
                         }
-                        moves.insert(MoveData::new(
+                        moves.push(MoveData::new(
                             start,
                             rf,
                             captures.clone()
                         ));
+                        dr_mut += dr;
+                        df_mut += df;
                     }
                 }
                 moves
@@ -145,12 +134,78 @@ pub mod move_validation {
 
         pub mod chameleon {
 
+            //Chameleon is sadly bugged:
+            //In a typical starting position, believes there are NO viable opening moves.
+
             //Errata: We declare that a chameleon adjacent to a king can always capture that king, even if the square is defended.
             //This is because, although a chameleon must move like a king, and thus not move into squares that could allow it to be captured the following turn,
             
             //Note: chameleons immobilizing immobilizers is handled inside the `immobilizer` module.
 
             use super::*;
+            pub fn generate_moves(board: &GameBoard, start: Rankfile, color: PlayerColor) -> Vec<MoveData> {
+                use UltimaPieceType::*;
+                let mut moves = vec![];
+
+                //overall number of valid moves should be *very* small,
+                //so iterating through linear structures to union is fine.
+
+                fn union_moves(moves: &mut Vec<MoveData>, extension: Vec<MoveData>) {
+                    for lhs_move in moves {
+                        for rhs_move in &extension {
+                            if lhs_move.end == rhs_move.end {
+                                lhs_move.captures.extend(rhs_move.captures.iter());
+                            }
+                        }
+                    }
+                }
+
+                //As pawn:
+                union_moves(&mut moves, pawn::move_generator_iter(board, start, color).filter(|move_data|{
+                    let Some(piece) = board.get_square(move_data.end) else {return false};
+                    piece.piece_type == Pawn
+                }).collect());
+
+                //As king:
+                //do NOT check for checkmate.
+                union_moves(&mut moves, king::generate_moves_naive(board, start, color).into_iter().filter(|move_data|{
+                    let Some(piece) = board.get_square(move_data.end) else {return false};
+                    piece.piece_type == King
+                }).collect());
+
+                //As Longleaper:
+                union_moves(&mut moves, longleaper::generate_moves(board, start, color).into_iter().filter(|move_data|{
+                    let Some(piece) = board.get_square(move_data.end) else {return false};
+                    piece.piece_type == Longleaper
+                }).collect());
+
+                //As Withdrawer:
+                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color).filter(|move_data| {
+                    let Some(piece) = board.get_square(move_data.end) else {return false};
+                    piece.piece_type == Withdrawer
+                }).collect());
+
+                //As Coordinator:
+                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color).filter(|move_data| {
+                    let Some(piece) = board.get_square(move_data.end) else {return false};
+                    piece.piece_type == Coordinator
+                }).collect());
+
+                //(No captures possible on Immobilizers or Chameleons)
+
+                //Native / non-capture moves:
+                union_moves(&mut moves, Rankfile::all_directions().flat_map(|&dir| {
+                    board.los(start, dir).filter_map(move |rf| {
+                        if let None = board.get_square(rf) {
+                            Some(MoveData{start, end: rf, captures: vec![]})
+                        } else {
+                            None
+                        }
+                    })
+                }).collect());
+                
+                moves
+            }
 
         }
         pub mod withdrawer {
@@ -179,8 +234,8 @@ pub mod move_validation {
         pub mod king {
             //for now, ignore checkmate, just play by capture-the-king rules.
             use super::*;
-            pub fn move_generator_iter(board: &GameBoard, start: Rankfile, color: PlayerColor) -> HashSet<MoveData> {
-                let mut moves = HashSet::<MoveData>::new();
+            pub fn generate_moves_naive(board: &GameBoard, start: Rankfile, color: PlayerColor) -> Vec<MoveData> {
+                let mut moves = vec![];
                 moves.extend(start.surrounding_rankfiles().filter_map(|rf| {
                     let Some(piece) = board.get_square(rf) 
                     else {
@@ -198,15 +253,17 @@ pub mod move_validation {
         }
         
     }
-    use piece_checkers::{chameleon, coordinator::{self, move_generator_iter}, immobilizer::{self, is_immobilized}, king, longleaper, pawn, withdrawer};
 
-    pub fn get_all_legal_moves(board: &GameBoard, start: Rankfile, piece: UltimaPiece) -> HashSet<MoveData> {
+    pub fn get_all_legal_moves(board: &GameBoard, start: Rankfile, piece: UltimaPiece) -> Vec<MoveData> {
+        //cache efficiency makes it prudent to go for vecs over hashsets for such small collections of data.
+        //empirical testing is still to be done.
         use UltimaPieceType::*;
-        if is_immobilized(board, start, piece) {return HashSet::new()}
+        use piece_checkers::*;
+        if immobilizer::is_immobilized(board, start, piece) {return Vec::new()}
         let color = piece.color;
         match piece.piece_type {
             Chameleon => {
-                todo!();
+                chameleon::generate_moves(board, start, color)
             },
             Coordinator => {
                 coordinator::move_generator_iter(board, start, color).collect()
@@ -215,7 +272,7 @@ pub mod move_validation {
                 immobilizer::move_generator_iter(board, start).collect()
             },
             King => {
-                king::move_generator_iter(board, start, color)
+                king::generate_moves_naive(board, start, color)
             },
             Longleaper => {
                 longleaper::generate_moves(board, start, color)
@@ -230,18 +287,16 @@ pub mod move_validation {
     }
 }
 
-pub mod board_changes {
-    use super::*;
-    fn execute_move(board: &mut GameBoard, move_to_execute: MoveData) {
-        let MoveData {
-            start,
-            end,
-            captures
-        } = move_to_execute;
-        for square in captures {
-            board.set_square(square, None);
-        }
-        board.set_square(end, board.get_square(start));
-        board.set_square(start, None);
+
+pub fn execute_move(board: &mut GameBoard, move_to_execute: MoveData) {
+    let MoveData {
+        start,
+        end,
+        captures
+    } = move_to_execute;
+    for square in captures {
+        board.set_square(square, None);
     }
+    board.set_square(end, board.get_square(start));
+    board.set_square(start, None);
 }

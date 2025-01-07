@@ -1,7 +1,7 @@
 mod datatypes;
 mod logic;
 
-pub use logic::move_validation;
+
 pub use datatypes::{
     board::{GameBoard, 
         rankfile::Rankfile

@@ -23,7 +23,6 @@ pub mod piece {
     }
 
 }
-use piece::{UltimaPiece, UltimaPieceType, PlayerColor};
 
 pub mod board {
     use super::piece::{PlayerColor, UltimaPiece};
@@ -347,13 +346,12 @@ pub mod board {
         }
     }
 }
-use board::GameBoard;
 use board::rankfile::Rankfile;
 
 pub mod moves {
     use super::Rankfile;
 
-    #[derive(PartialEq, Eq, Hash)]
+    #[derive(PartialEq, Eq, Hash, Clone)]
     pub struct MoveData {
         pub start: Rankfile,
         pub end: Rankfile,

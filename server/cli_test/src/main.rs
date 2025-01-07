@@ -1,10 +1,9 @@
-use std::{collections::HashSet, fmt};
-
 use game::{
     move_validation,
+    execute_move,
     GameBoard,
     Rankfile,
-    MoveData,
+    //MoveData,
     UltimaPiece,
     UltimaPieceType,
     PlayerColor
@@ -114,12 +113,38 @@ fn main() {
         }
 
         println!();
+        
+        let move_executed = loop {
+            println!("Which square will you move it to, {bw}? Enter the square's rank", );
+            let rank_str = scan_string()
+                .replace(" ", "")
+                .replace("\n", "");
+            println!("Now enter the piece's file." );
+            let file_str = scan_string()
+                .replace(" ", "")
+                .replace("\n", "");
+            let rf = match Rankfile::from_strings(rank_str, file_str) {
+                Some(rf) => rf,
+                None => {println!("Couldn't parse string, try again."); continue;}
+            };
+            let mut final_move = None;
+            for mv in &legal_moves {
+                if mv.end == rf {
+                    final_move = Some((*mv).clone());
+                    break;
+                }
+            }
+            if let Some(final_move) = final_move {
+                break(final_move);
+            } else {
+                println!("That's not a legal move!");
+            }
+            
+        };
 
-        let temp_board = board.clone();
-
-
+        execute_move(&mut board, move_executed);
+        
         whose_turn = flip_color(whose_turn);
     }
-    let s = scan_string();
 
 }
