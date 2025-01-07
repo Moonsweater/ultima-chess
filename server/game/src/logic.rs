@@ -13,6 +13,12 @@ pub mod move_validation {
     mod piece_checkers {
         use super::*;
         pub mod pawn {
+            //BUG: movement can cause the pawn itself to disappear in certain cases.
+            //Still need to isolate exact causes.
+
+            //first diagnosis step: see if it's a bug with the capture checkers or with the board updating,
+            //by printing the set of captures alongside each move.
+
             use super::*;
             pub fn move_generator_iter<'board>
             (board: &'board GameBoard, start: Rankfile, color: PlayerColor) 
@@ -20,7 +26,7 @@ pub mod move_validation {
             { 
                 Rankfile::cardinal_directions().flat_map(move |&dir| {
                     board.los(start, dir).map(move |rf| {
-                        let captures = Rankfile::all_directions().filter_map(|&(dr, df)| { 
+                        let captures = Rankfile::all_directions().filter_map(|&(dr, df)| {
                             let (r, f) = rf.to_signed_coords();
                             let surrounding = board.get_square_from_coords(r + 2 * dr, f + 2 * df)?;
                             if surrounding.color == color {
@@ -134,8 +140,7 @@ pub mod move_validation {
 
         pub mod chameleon {
 
-            //Chameleon is sadly bugged:
-            //In a typical starting position, believes there are NO viable opening moves.
+            //Bug: not recognizing viable longleaper capture.
 
             //Errata: We declare that a chameleon adjacent to a king can always capture that king, even if the square is defended.
             //This is because, although a chameleon must move like a king, and thus not move into squares that could allow it to be captured the following turn,
@@ -145,51 +150,68 @@ pub mod move_validation {
             use super::*;
             pub fn generate_moves(board: &GameBoard, start: Rankfile, color: PlayerColor) -> Vec<MoveData> {
                 use UltimaPieceType::*;
+
                 let mut moves = vec![];
 
                 //overall number of valid moves should be *very* small,
                 //so iterating through linear structures to union is fine.
 
                 fn union_moves(moves: &mut Vec<MoveData>, extension: Vec<MoveData>) {
-                    for lhs_move in moves {
-                        for rhs_move in &extension {
+                    let mut unioned;
+                    for rhs_move in &extension {
+                        unioned = false;
+                        for lhs_move in &mut *moves {
                             if lhs_move.end == rhs_move.end {
                                 lhs_move.captures.extend(rhs_move.captures.iter());
+                                unioned = true;
+                                break;
                             }
+                        }
+                        if !unioned {
+                            moves.push((*rhs_move).clone())
                         }
                     }
                 }
 
+                let keep_if_cham_match = |piece_type: UltimaPieceType| {
+                    move |move_data: MoveData| {
+                        let mut captures_out = vec![];
+                        for capture in move_data.captures {
+                            if let Some(p) = board.get_square(capture) {
+                                if p.color != color && p.piece_type == piece_type {
+                                    captures_out.push(capture);
+                                }
+                            }
+                        }
+                        if !captures_out.is_empty() {
+                            Some(MoveData{start: move_data.start, end: move_data.end, captures: captures_out})
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                //objection! needs to filter by the CAPTURES including the correct color and type,
+                //NOT by anything involving the end square!!!
+
                 //As pawn:
-                union_moves(&mut moves, pawn::move_generator_iter(board, start, color).filter(|move_data|{
-                    let Some(piece) = board.get_square(move_data.end) else {return false};
-                    piece.piece_type == Pawn
-                }).collect());
+                union_moves(&mut moves, pawn::move_generator_iter(board, start, color)
+                    .filter_map(keep_if_cham_match(Pawn)).collect());
 
                 //As king:
                 //do NOT check for checkmate.
-                union_moves(&mut moves, king::generate_moves_naive(board, start, color).into_iter().filter(|move_data|{
-                    let Some(piece) = board.get_square(move_data.end) else {return false};
-                    piece.piece_type == King
-                }).collect());
+                union_moves(&mut moves, king::generate_moves_naive(board, start, color).into_iter()
+                    .filter_map(keep_if_cham_match(King)).collect());
 
                 //As Longleaper:
-                union_moves(&mut moves, longleaper::generate_moves(board, start, color).into_iter().filter(|move_data|{
-                    let Some(piece) = board.get_square(move_data.end) else {return false};
-                    piece.piece_type == Longleaper
-                }).collect());
-
+                union_moves(&mut moves, longleaper::generate_moves(board, start, color).into_iter()
+                    .filter_map(keep_if_cham_match(Longleaper)).collect());
                 //As Withdrawer:
-                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color).filter(|move_data| {
-                    let Some(piece) = board.get_square(move_data.end) else {return false};
-                    piece.piece_type == Withdrawer
-                }).collect());
-
+                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color)
+                    .filter_map(keep_if_cham_match(Withdrawer)).collect());
                 //As Coordinator:
-                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color).filter(|move_data| {
-                    let Some(piece) = board.get_square(move_data.end) else {return false};
-                    piece.piece_type == Coordinator
-                }).collect());
+                union_moves(&mut moves, withdrawer::move_generator_iter(board, start, color)
+                    .filter_map(keep_if_cham_match(King)).collect());
 
                 //(No captures possible on Immobilizers or Chameleons)
 
@@ -199,7 +221,9 @@ pub mod move_validation {
                         if let None = board.get_square(rf) {
                             Some(MoveData{start, end: rf, captures: vec![]})
                         } else {
-                            None
+                            //Theoretically impossible, since los already filters away this case.
+                            panic!()
+                            //Maybe should do something besides panicking...
                         }
                     })
                 }).collect());
@@ -288,14 +312,18 @@ pub mod move_validation {
 }
 
 
-pub fn execute_move(board: &mut GameBoard, move_to_execute: MoveData) {
+pub fn execute_move(board: &mut GameBoard, move_to_execute: MoveData, whose_turn: PlayerColor) {
     let MoveData {
         start,
         end,
         captures
     } = move_to_execute;
     for square in captures {
-        board.set_square(square, None);
+        if let Some(p) = board.get_square(square) {
+            if p.color != whose_turn {
+                board.set_square(square, None);
+            }
+        }
     }
     board.set_square(end, board.get_square(start));
     board.set_square(start, None);

@@ -9,6 +9,14 @@ use game::{
     PlayerColor
 };
 
+//TODO: RUN CLI_TEST ON PAWN MISHAP CASE, SEE IF IT'S A PROBLEM WITH DETECTION OR EXECUTION
+
+//Bug 1: The move executor captures EVERYTHING in a threatened square, not just enemy pieces on such squares.
+//Bug 2: The move executor can make a move capture itself, if it threatens the square it moved away from.
+    //(But, fixing bug 1 will solve bug 2).
+
+    //PROBABLY fine now, but double check.
+
 fn board_to_string(board: &GameBoard) -> String {
 
     fn square_to_char(s: Option<UltimaPiece>) -> String {
@@ -109,7 +117,12 @@ fn main() {
         println!("Great! Here are your legal moves:");
         for mv in legal_moves.iter() {
             let (r, f) = mv.end.to_strings();
-            println!("    {r}{f}");
+            print!("    {r}{f}, captures: ");
+            for capture in &mv.captures {
+                let (cr, cf) = capture.to_strings();
+                print!("{cr}{cf},");
+            }
+            println!();
         }
 
         println!();
@@ -142,7 +155,7 @@ fn main() {
             
         };
 
-        execute_move(&mut board, move_executed);
+        execute_move(&mut board, move_executed, whose_turn);
         
         whose_turn = flip_color(whose_turn);
     }

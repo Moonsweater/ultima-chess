@@ -123,10 +123,10 @@ pub mod board {
                     _ => {return None;}
                 };
                 let f = match f.as_str() {
-                    "A" => File::A, "B" => File::B, 
-                    "C" => File::C, "D" => File::D, 
-                    "E" => File::E, "F" => File::F, 
-                    "G" => File::G, "H" => File::H,
+                    "A" | "a" => File::A, "B" | "b" => File::B, 
+                    "C" | "c" => File::C, "D" | "d" => File::D, 
+                    "E" | "e" => File::E, "F" | "f" => File::F, 
+                    "G" | "g" => File::G, "H" | "h" => File::H,
                     _ => {return None;}
                 };
                 Some(Self {
