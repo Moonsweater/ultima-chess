@@ -1,0 +1,1 @@
+FlatMap<impl Iterator<Item = &'static (i8, i8)>, _, Map<Map<impl Iterator<Item = rankfile::Rankfile> + '_, {closure@game/src/logic.rs:165:42: 165:46}>, {closure@game/src/logic.rs:175:28: 175:38}>>

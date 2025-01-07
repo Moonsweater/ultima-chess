@@ -15,18 +15,20 @@ pub mod piece {
         Withdrawer,
         King
     }
+
     #[derive(PartialEq, Eq, Copy, Clone)]
     pub enum PlayerColor {
         Black,
         White
     }
+
 }
 use piece::{UltimaPiece, UltimaPieceType, PlayerColor};
 
 pub mod board {
     use super::piece::{PlayerColor, UltimaPiece};
     pub type Square = Option<UltimaPiece>;
-    pub mod position {
+    pub mod rankfile {
         #[derive(PartialEq, Eq, Hash, Clone, Copy)]
         pub enum Rank {
             R1,
@@ -95,8 +97,13 @@ pub mod board {
             pub rank: Rank,
             pub file: File
         }
+
+        pub type Direction = (i8, i8);
+        const ALL_DIRECTIONS: [Direction; 8] = [(1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1)];
+        const CARDINAL_DIRECTIONS: [Direction; 4] = [(1, 0), (0, -1), (-1, 0), (0, 1)];
+
         impl Rankfile {
-            pub fn from_signed_coords(r: i8, f:i8) -> Option<Rankfile> {
+            pub fn from(r: i8, f: i8) -> Option<Rankfile> {
                 Some(Self {
                     rank: Rank::new_if_exists(r)?,
                     file: File::new_if_exists(f)?
@@ -144,10 +151,39 @@ pub mod board {
                 (String::from(r_str), String::from(f_str))
             }
 
+            //Iterators:
+            //(All exclude self / the center)
+
+
+            pub fn all_directions() -> impl Iterator <Item = &'static Direction> {
+                ALL_DIRECTIONS.iter()
+            }
+            pub fn cardinal_directions() -> impl Iterator<Item = &'static Direction> {
+                CARDINAL_DIRECTIONS.iter()
+            }
+            pub fn surrounding_rankfiles(&self) -> impl Iterator<Item = Rankfile> {
+                let (r, f) = self.to_signed_coords();
+                ALL_DIRECTIONS.iter().filter_map(move |(dr, df)| {
+                    Self::from(r + dr, f + df)
+                })
+            }
+            pub fn card_ord_rankfiles(&self) -> impl Iterator<Item = Rankfile> {
+                let (r, f) = self.to_signed_coords();
+                ALL_DIRECTIONS.iter().flat_map(move |(dr, df)| {
+                    (1..8).map_while(move |i| Rankfile::from(r + dr * i, f + df * i))
+                })
+            }
+            pub fn card_rankfiles(&self) -> impl Iterator<Item = Rankfile> {
+                let (r, f) = self.to_signed_coords();
+                CARDINAL_DIRECTIONS.iter().flat_map(move |(dr, df)| {
+                    (1..8).map_while(move |i| Rankfile::from(r + dr * i, f + df * i))
+                })
+            }
+
         }
     }
 
-    use position::Rankfile;
+    use rankfile::Rankfile;
 
     #[derive(Clone)]
     pub struct GameBoard {
@@ -157,7 +193,7 @@ pub mod board {
     }
     mod board_init_consts {
         use super::{UltimaPiece, Square, Rankfile};
-        use super::position::{Rank, File};
+        use super::rankfile::{Rank, File};
         use super::super::piece::{UltimaPieceType, PlayerColor};
 
         const EMPTY_SQUARE: Square = None;
@@ -267,7 +303,7 @@ pub mod board {
             self.board[r][f]
         }
         pub fn get_square_from_coords(&self, r: i8, f: i8) -> Square {
-            let rf = match Rankfile::from_signed_coords(r, f) {
+            let rf = match Rankfile::from(r, f) {
                 None => return None,
                 Some(rf) => rf
             };
@@ -294,10 +330,25 @@ pub mod board {
                 PlayerColor::Black => &self.black_king_locs
             }
         }
+        pub fn los(&self, start: Rankfile, dir: rankfile::Direction) -> impl Iterator<Item = Rankfile> + '_ {
+            let (r, f) = start.to_signed_coords();
+            (1..8).map_while(move |i| {Rankfile::from(r + dir.0 * i, f + dir.1 * i)})
+            .map_while(|rf| {
+                if let None = self.get_square(rf) {
+                    Some(rf)
+                } else {
+                    None
+                }
+            })
+        }
+        pub fn set_square(&mut self, rf: Rankfile, value: Square) {
+            let (r, f) = rf.to_unsigned_coords();
+            self.board[r][f] = value;
+        }
     }
 }
 use board::GameBoard;
-use board::position::Rankfile;
+use board::rankfile::Rankfile;
 
 pub mod moves {
     use super::Rankfile;
