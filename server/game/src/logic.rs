@@ -13,11 +13,6 @@ pub mod move_validation {
     mod piece_checkers {
         use super::*;
         pub mod pawn {
-            //BUG: movement can cause the pawn itself to disappear in certain cases.
-            //Still need to isolate exact causes.
-
-            //first diagnosis step: see if it's a bug with the capture checkers or with the board updating,
-            //by printing the set of captures alongside each move.
 
             use super::*;
             pub fn move_generator_iter<'board>
@@ -139,8 +134,6 @@ pub mod move_validation {
         }
 
         pub mod chameleon {
-
-            //Bug: not recognizing viable longleaper capture.
 
             //Errata: We declare that a chameleon adjacent to a king can always capture that king, even if the square is defended.
             //This is because, although a chameleon must move like a king, and thus not move into squares that could allow it to be captured the following turn,
